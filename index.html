@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Time To Tap</title>
+		<link rel="icon" type="image/png" href="/images/favicon.png">
+			<style>
+				body {
+					margin: 0;
+					height: 100vh;
+					display: flex;
+					justify-content: center;
+					align-items: center;
+					font-family: Arial, sans-serif;
+					background-image: url("images/background.jpg");
+					background-size: cover;
+				}
+
+				.container {
+					text-align: center;
+					border: 1px solid black;
+				}
+
+				.zipBox {
+					background-color: #FFFFFF;
+					border-radius: 10px;
+					padding: 2em;
+					box-shadow: 0 0 3em #000000;
+				}
+
+				.zipCodeInput {
+					width: 10em;
+				}
+
+				.zipCodeInputLabel {
+					font-size: 1.5rem;
+					padding-top: 0;
+					padding-bottom: 0.9em;
+				}
+
+				input[type="text"] {
+					padding: 10px;
+					font-size: 16px;
+				}
+
+				button {
+					margin-top: 10px;
+					padding: 10px 20px;
+					font-size: 16px;
+					cursor: pointer;
+				}
+
+				.table {
+					margin-top: 20px;
+					display: grid;
+					grid-template-columns: repeat(4, auto);
+					gap: 10px 30px;
+					justify-content: center;
+				}
+
+				.row-label {
+					padding: 5px 0;
+				}
+
+				.alert-button {
+					margin-top: 20px;
+				}
+			
+				.green {
+					background-color: #0F0;
+				}
+			
+				.orange {
+					background-color: #FFA500;
+				}
+			
+				.red {
+					background-color: #FF2400;
+				}
+			
+				input::placeholder {
+					font-style: italic;
+				}
+
+				#toast-container {
+					position: fixed;
+					top: 1rem;
+					left: 50%;
+					transform: translateX(-50%);
+					display: flex;
+					flex-direction: column;
+					gap: 0.5rem;
+					z-index: 9999;
+					pointer-events: none;
+				}
+
+				.toast {
+					background: #FF0F0F;
+					color: white;
+					padding: 0.75rem 1rem;
+					border-radius: 6px;
+					box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+					font-size: 0.9rem;
+					pointer-events: auto;
+					opacity: 0;
+					transform: translateY(-10px);
+					animation: toast-in 250ms ease forwards, toast-out 250ms ease forwards 3s;
+				}
+
+				@keyframes toast-in {
+					to {
+						opacity: 1;
+						transform: translateY(0);
+					}
+				}
+
+				@keyframes toast-out {
+					to {
+					opacity: 0;
+					transform: translateY(-10px);
+					}
+				}
+
+				.popup-overlay {
+					position: fixed;
+					inset: 0;	  
+					z-index: 9999;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+				}
+
+				.popup-box {
+					background: #fff;
+					padding: 20px 24px;
+					border-radius: 8px;
+					border: 1px solid #000;
+					max-width: 400px;
+					width: 90%;
+					box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+					font-family: system-ui, sans-serif;
+				}
+
+				.popup-close {
+					margin-top: 16px;
+					padding: 8px 14px;
+				}
+			}
+		</style>
+<script>
+	document.addEventListener('DOMContentLoaded', () => {
+		const zipCodeBox = document.getElementById('zipCode');
+		zipCodeBox.addEventListener('keypress', e => {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				document.getElementById('zipButton').click();
+			}
+		});
+		const zipcode = getUrlParam('zipcode');
+		if (zipcode != null) {
+			document.getElementById('zipCode').value = zipcode;
+			checkTapage();
+		}
+	}, false);
+
+	function showToast(message, duration = 3000) {
+		let container = document.getElementById("toast-container");
+		if (!container) {
+			container = document.createElement("div");
+			container.id = "toast-container";
+			document.body.appendChild(container);
+		}
+
+		const toast = document.createElement("div");
+		toast.className = "toast";
+		toast.textContent = message;
+		container.appendChild(toast);
+
+		setTimeout(() => {
+			toast.remove();
+		}, duration + 500);
+	}
+
+	async function getSevenDayHighLow(zipCode) {
+		const geoRes = await fetch(`https://api.zippopotam.us/us/${zipCode}`);
+		if (!geoRes.ok) {
+			throw new Error(`Problem fetching zipcode. code ${geoRes.status}: ${geoRes.statusText})`);
+		}
+
+		const geoData = await geoRes.json();
+		const { latitude, longitude } = geoData.places[0];
+
+		const pointsRes = await fetch(
+		`https://api.weather.gov/points/${latitude},${longitude}`,
+		{
+			headers: {
+				"Accept": "application/geo+json"
+			}
+		}
+	);
+
+	if (!pointsRes.ok) {
+		throw new Error(`Problem fetching data from the National Weather Service. code ${pointsRes.status}: ${pointsRes.statusText}`);
+	}
+
+	const pointsData = await pointsRes.json();
+	const forecastUrl = pointsData.properties.forecast;
+
+	const forecastRes = await fetch(forecastUrl);
+	if (!forecastRes.ok) {
+		throw new Error(`Problem fetching forecast for ${zipCode}. code ${forecastRes.status}: ${forecastRes.statusText}`);
+	}
+
+	const forecastData = await forecastRes.json();
+	const periods = forecastData.properties.periods;
+
+	const dailyTemps = {};
+
+	for (const period of periods) {
+		const date = period.startTime.split("T")[0];
+
+		if (!dailyTemps[date]) {
+			dailyTemps[date] = { date, high: null, low: null };
+		}
+
+		if (period.isDaytime) {
+			dailyTemps[date].high = period.temperature;
+		} else {
+			dailyTemps[date].low = period.temperature;
+		}
+	}
+
+	return Object.values(dailyTemps)
+		.filter(d => d.high !== null && d.low !== null)
+		.slice(0, 7);
+	}
+
+	function getScoreAndLabel(high, low) {
+		let result = '';
+		let label = '';
+		if (high >= 40 && low <= 20) {
+			result += 'Excellent';
+			label = 'green';
+		}
+		else if (high >= 35 && low <= 25) {
+			result += 'Good';
+			label = 'green';
+		}
+		else if (high >= 32 && low < 30) {
+			result += 'Ok';
+			label = 'orange';
+		} else {
+			result += 'Not good';
+			label = 'red';
+		}
+		return [result, label];
+	}
+
+	function handleResults(zipCode, temps) {
+		const tableContainer = document.getElementById("tableContainer");
+		tableContainer.innerHTML = '';
+
+		const table = document.createElement("div");
+		table.className = "table";
+		tableContainer.appendChild(document.createElement('br'));
+
+		const dateTitle = document.createElement("div");
+		dateTitle.className = "row-label";
+		dateTitle.textContent = 'Date';
+		table.appendChild(dateTitle);
+		const highTitle = document.createElement("div");
+		highTitle.className = "row-label";
+		highTitle.textContent = 'High';
+		table.appendChild(highTitle);
+		const lowTitle = document.createElement("div");
+		lowTitle.className = "row-label";
+		lowTitle.textContent = 'Low';
+		table.appendChild(lowTitle);
+		const predictionTitle = document.createElement("div");
+		predictionTitle.className = "row-label";
+		predictionTitle.textContent = 'Predicted Sap Flow';
+		table.appendChild(predictionTitle);
+		temps.forEach(temp => {
+			const dateLabel = document.createElement("div");
+			dateLabel.className = "row-label";
+			dateLabel.textContent = `${temp.date}`;
+			table.appendChild(dateLabel);
+			const highLabel = document.createElement("div");
+			highLabel.className = "row-label";
+			highLabel.textContent = `${temp.high} °F`;
+			table.appendChild(highLabel);
+			const lowLabel = document.createElement("div");
+			lowLabel.className = "row-label";
+			lowLabel.textContent = `${temp.low} °F`;
+			table.appendChild(lowLabel);
+			const score = getScoreAndLabel(temp.high, temp.low);
+			const tapabilityLabel = document.createElement("div");
+			tapabilityLabel.classList.add('row-label', score[1]);
+			tapabilityLabel.textContent = score[0];
+			table.appendChild(tapabilityLabel);
+		});
+
+		tableContainer.appendChild(table);
+  
+		tableContainer.appendChild(document.createElement('br'));
+
+		const alertButton = document.createElement("button");
+		alertButton.textContent = `Send alerts for ${zipCode}!`;
+		alertButton.className = "alert-button";
+		alertButton.onclick = () => showPopup("If you're interested in automated updates on days to tap please email <a href=\"mailto:timetotapupdates@gmail.com\">timetotapupdates@gmail.com</a>");
+
+		tableContainer.appendChild(alertButton);
+
+		tableContainer.appendChild(document.createElement('br'));
+
+		const resetButton = document.createElement("button");
+		resetButton.textContent = `Reset`;
+		resetButton.className = "reset-button";
+		resetButton.onclick = () => reset();
+
+		tableContainer.appendChild(resetButton);
+	}
+
+	function reset() {
+		const url = new URL(window.location);
+		url.searchParams.delete('zipcode');
+		window.history.replaceState({}, '', url.toString());
+		document.getElementById('tableContainer').innerHTML = '';
+		document.getElementById('zipCode').value = '';
+		document.getElementById('zipCode').focus();
+	}
+
+	function isLikelyValidZIP(zipCode) {
+		if (!/^\d+$/.test(zipCode)) {
+			return false;
+		}
+		const numCode = parseInt(zipCode, 10);
+		if (numCode < 501 || numCode > 99950) {
+			return false;
+		}
+		return true;
+	}
+
+	function setUrlParam(key, value) {
+		const url = new URL(window.location.href);
+		url.searchParams.set(key, value);
+		window.history.replaceState({}, '', url.toString());
+	}
+
+	function getUrlParam(key) {
+		const params = new URLSearchParams(window.location.search);
+		return params.get(key);
+	}
+
+	async function checkTapage() {
+		const tableContainer = document.getElementById("tableContainer");
+		let zipCode = document.getElementById('zipCode').value;
+  
+		if (/^\d{5}/.test(zipCode)) {
+			zipCode = zipCode.substring(0, 5);
+		}
+		if (!isLikelyValidZIP(zipCode)) {
+			showToast('Invalid ZIP code');
+			return;
+		}
+		setUrlParam('zipcode', zipCode);
+		tableContainer.innerHTML = "Fetchiing forecast...";
+		await getSevenDayHighLow(zipCode).then(temps => handleResults(zipCode, temps)).catch(e => showToast('Sorry, we encountered an issue.'));
+	}
+
+	function showPopup(text) {
+		const overlay = document.createElement("div");
+		overlay.className = "popup-overlay";
+
+		const popup = document.createElement("div");
+		popup.className = "popup-box";
+
+		popup.innerHTML = `
+			<div>${text}</div>
+			<button class="popup-close">Close</button>
+		`;
+
+		popup.querySelector(".popup-close").addEventListener("click", () => {
+			document.body.removeChild(overlay);
+		});
+
+		overlay.addEventListener("click", (e) => {
+			if (e.target === overlay) {
+				document.body.removeChild(overlay);
+			}
+		});
+
+		overlay.appendChild(popup);
+		document.body.appendChild(overlay);
+	}
+</script>
+	</head>
+	<body>
+		<div class="container zipBox">
+			<div class="zipCodeInputLabel">ZIP code</div>
+			<input type="text" id="zipCode" class="zipCodeInput" placeholder="00000, 00000-0000" autofocus />
+			<br />
+			<br />
+			<button id="zipButton" onclick="checkTapage()">Is it Time To Tap?</button>
+			<div id="tableContainer"></div>
+		</div>
+	</body>
+</html>
