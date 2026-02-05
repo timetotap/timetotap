@@ -364,7 +364,7 @@
 			return;
 		}
 		setUrlParam('zipcode', zipCode);
-		tableContainer.innerHTML = "Fetchiing forecast...";
+		tableContainer.innerHTML = "Fetching forecast...";
 		await getSevenDayHighLow(zipCode).then(temps => handleResults(zipCode, temps)).catch(e => showToast('Sorry, we encountered an issue.'));
 	}
 
@@ -406,3 +406,4 @@
 		</div>
 	</body>
 </html>
+
